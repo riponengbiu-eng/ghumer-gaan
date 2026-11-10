@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:just_audio_background/just_audio_background.dart';
-import 'package:on_audio_query/on_audio_query.dart';
+import 'package:photo_manager/photo_manager.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -45,9 +45,8 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  final _audioQuery = OnAudioQuery();
   final _player = AudioPlayer();
-  List<SongModel> _songs = [];
+  List<String> _titles = [];
   bool _loading = true, _denied = false;
 
   Timer? _ticker;
@@ -63,25 +62,39 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _loadSongs() async {
-    var ok = await _audioQuery.permissionsStatus();
-    if (!ok) ok = await _audioQuery.permissionsRequest();
-    if (!ok) {
+    setState(() => _loading = true);
+    final perm = await PhotoManager.requestPermissionExtend(
+      requestOption: PermissionRequestOption(
+        androidPermission:
+            const AndroidPermission(type: RequestType.audio, mediaLocation: false),
+      ),
+    );
+    if (!perm.hasAccess) {
       setState(() { _loading = false; _denied = true; });
       return;
     }
-    final songs = await _audioQuery.querySongs(
-      sortType: SongSortType.TITLE,
-      orderType: OrderType.ASC_OR_SMALLER,
-      uriType: UriType.EXTERNAL,
-      ignoreCase: true,
+    final paths = await PhotoManager.getAssetPathList(
+      type: RequestType.audio,
+      onlyAll: true,
     );
-    _songs = songs.where((s) => (s.duration ?? 0) > 30000 && s.isMusic == true).toList();
-    final sources = _songs
-        .map((s) => AudioSource.uri(
-              Uri.parse(s.uri!),
-              tag: MediaItem(id: '${s.id}', title: s.title, artist: s.artist ?? ''),
-            ))
-        .toList();
+    final sources = <AudioSource>[];
+    final titles = <String>[];
+    if (paths.isNotEmpty) {
+      final total = await paths.first.assetCountAsync;
+      final assets = await paths.first.getAssetListRange(start: 0, end: total);
+      for (final a in assets) {
+        if (a.duration < 30) continue;
+        final f = await a.originFile;
+        if (f == null) continue;
+        final title = (a.title ?? 'গান').replaceAll(RegExp(r'\.[A-Za-z0-9]+$'), '');
+        titles.add(title);
+        sources.add(AudioSource.uri(
+          Uri.file(f.path),
+          tag: MediaItem(id: a.id, title: title),
+        ));
+      }
+    }
+    _titles = titles;
     if (sources.isNotEmpty) {
       await _player.setAudioSource(ConcatenatingAudioSource(children: sources));
       await _player.setLoopMode(LoopMode.all);
@@ -105,7 +118,7 @@ class _HomePageState extends State<HomePage> {
       if (left <= _fadeSeconds) _player.setVolume(left / _fadeSeconds);
       setState(() => _left = left);
     });
-    if (!_player.playing && _songs.isNotEmpty) _player.play();
+    if (!_player.playing && _titles.isNotEmpty) _player.play();
     setState(() => _left = minutes * 60);
   }
 
@@ -177,17 +190,16 @@ class _HomePageState extends State<HomePage> {
         ]),
       );
     }
-    if (_songs.isEmpty) return const Center(child: Text('ফোনে কোনো গান পাওয়া যায়নি'));
+    if (_titles.isEmpty) return const Center(child: Text('ফোনে কোনো গান পাওয়া যায়নি'));
     return StreamBuilder<int?>(
       stream: _player.currentIndexStream,
       builder: (context, snap) {
         final cur = snap.data;
         return ListView.builder(
-          itemCount: _songs.length,
+          itemCount: _titles.length,
           itemBuilder: (_, i) => ListTile(
             leading: Icon(i == cur ? Icons.graphic_eq : Icons.music_note),
-            title: Text(_songs[i].title, maxLines: 1, overflow: TextOverflow.ellipsis),
-            subtitle: Text(_songs[i].artist ?? '', maxLines: 1, overflow: TextOverflow.ellipsis),
+            title: Text(_titles[i], maxLines: 1, overflow: TextOverflow.ellipsis),
             selected: i == cur,
             onTap: () async {
               await _player.setVolume(1);
