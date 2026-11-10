@@ -1,0 +1,79 @@
+name: Build APK
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Create Android project files
+        run: |
+          flutter create --platforms=android --org com.example --project-name ghumer_gaan tmp_app
+          cp -r tmp_app/android ./android
+          rm -rf tmp_app
+
+      - name: Install packages
+        run: flutter pub get
+
+      - name: Patch Android files
+        run: |
+          python3 - << 'PY'
+          import re
+          p = 'android/app/src/main/AndroidManifest.xml'
+          s = open(p, encoding='utf-8').read()
+          perms = '''<uses-permission android:name="android.permission.READ_MEDIA_AUDIO"/>
+              <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
+              <uses-permission android:name="android.permission.WAKE_LOCK"/>
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
+              '''
+          s = s.replace('<application', perms + '<application', 1)
+          s = s.replace('android:name=".MainActivity"', 'android:name="com.ryanheise.audioservice.AudioServiceActivity"')
+          s = s.replace('android:label="ghumer_gaan"', 'android:label="ঘুমের গান"')
+          svc = '''<service android:name="com.ryanheise.audioservice.AudioService"
+                  android:foregroundServiceType="mediaPlayback"
+                  android:exported="true">
+                  <intent-filter>
+                      <action android:name="android.media.browse.MediaBrowserService"/>
+                  </intent-filter>
+              </service>
+              <receiver android:name="com.ryanheise.audioservice.MediaButtonReceiver"
+                  android:exported="true">
+                  <intent-filter>
+                      <action android:name="android.intent.action.MEDIA_BUTTON"/>
+                  </intent-filter>
+              </receiver>
+              '''
+          s = s.replace('</application>', svc + '</application>')
+          open(p, 'w', encoding='utf-8').write(s)
+
+          import glob
+          for g in glob.glob('android/app/build.gradle*'):
+              t = open(g, encoding='utf-8').read()
+              t = re.sub(r'minSdk(Version)?\s*=?\s*flutter\.minSdkVersion', 'minSdk = 23', t)
+              open(g, 'w', encoding='utf-8').write(t)
+          PY
+          for f in $(find $HOME/.pub-cache -path '*on_audio_query*/android/build.gradle'); do
+            grep -q namespace "$f" || sed -i '0,/^android {/s//android {\n    namespace "com.lucasjosino.on_audio_query"/' "$f"
+          done
+
+      - name: Build APK
+        run: flutter build apk --release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ghumer-gaan-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
