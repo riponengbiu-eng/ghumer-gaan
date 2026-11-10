@@ -1,0 +1,17 @@
+name: ghumer_gaan
+description: Sleep timer music player
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  just_audio: ^0.9.40
+  just_audio_background: ^0.0.1-beta.13
+  on_audio_query: ^2.9.0
+
+flutter:
+  uses-material-design: true
