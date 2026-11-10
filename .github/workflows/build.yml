@@ -66,9 +66,21 @@ jobs:
               t = re.sub(r'minSdk(Version)?\s*=?\s*flutter\.minSdkVersion', 'minSdk = 23', t)
               open(g, 'w', encoding='utf-8').write(t)
           PY
-          for f in $(find $HOME/.pub-cache -path '*on_audio_query*/android/build.gradle'); do
-            grep -q namespace "$f" || sed -i '0,/^android {/s//android {\n    namespace "com.lucasjosino.on_audio_query"/' "$f"
-          done
+          python3 - << 'PY2'
+          import glob, re, os
+          pattern = os.path.expanduser('~/.pub-cache/**/on_audio_query*/android/build.gradle')
+          for g in glob.glob(pattern, recursive=True):
+              t = open(g, encoding='utf-8').read()
+              if 'namespace' not in t:
+                  t = re.sub(r'(\nandroid\s*\{)', r'\1\n    namespace "com.lucasjosino.on_audio_query"', t, count=1)
+              t = re.sub(r'JavaVersion\.VERSION_[0-9_]+', 'JavaVersion.VERSION_17', t)
+              if 'jvmTarget' in t:
+                  t = re.sub(r"jvmTarget\s*=\s*['\"][^'\"]+['\"]", "jvmTarget = '17'", t)
+              else:
+                  t = re.sub(r'(\nandroid\s*\{)', r"\1\n    kotlinOptions { jvmTarget = '17' }", t, count=1)
+              open(g, 'w', encoding='utf-8').write(t)
+              print('patched', g)
+          PY2
 
       - name: Build APK
         run: flutter build apk --release
